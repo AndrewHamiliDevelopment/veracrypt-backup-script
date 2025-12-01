@@ -34,7 +34,7 @@ cd veracrypt-backup-script
 chmod +x veracrypt_backup.sh
 ```
 
-3. Set up authentication (choose ONE method):
+3. Set up authentication (at least one method required, both can be used together):
 
 **Option A - Using Password:**
 ```bash
@@ -49,6 +49,12 @@ export VERACRYPT_KEYFILES='/path/to/your/keyfile'
 **Option C - Using Multiple Keyfiles:**
 ```bash
 export VERACRYPT_KEYFILES='/path/to/key1,/path/to/key2,/path/to/key3'
+```
+
+**Option D - Using Both Password and Keyfiles (Maximum Security):**
+```bash
+export VERACRYPT_PASSWORD='YourSecurePassword123'
+export VERACRYPT_KEYFILES='/path/to/your/keyfile'
 ```
 
 ## Usage
@@ -89,6 +95,13 @@ export VERACRYPT_PASSWORD='MyPassword'
 ```bash
 export VERACRYPT_KEYFILES='/mnt/key1,/mnt/key2'
 ./veracrypt_backup.sh --skip /backup/data
+```
+
+**Maximum security with both password and keyfiles:**
+```bash
+export VERACRYPT_PASSWORD='MyPassword'
+export VERACRYPT_KEYFILES='/mnt/securekey'
+./veracrypt_backup.sh /backup/data
 ```
 
 ## How It Works
@@ -231,6 +244,24 @@ export VERACRYPT_KEYFILES='/mnt/key1,/home/user/.key2,/etc/backup.key'
 - Requires managing keyfile(s)
 - Keyfiles must be accessible when script runs
 
+### Combined Password + Keyfile Authentication
+
+For maximum security, you can use both a password and keyfiles together:
+
+```bash
+export VERACRYPT_PASSWORD='YourSecurePassword123'
+export VERACRYPT_KEYFILES='/mnt/securekey'
+```
+
+**Pros:**
+- Highest level of security (layered authentication)
+- Requires both something you know (password) and something you have (keyfiles)
+- Even if keyfiles are compromised, password still provides protection
+
+**Cons:**
+- More complex to set up and manage
+- Requires both password and keyfiles available for decryption
+
 ## Error Handling
 
 ### Common Errors
@@ -238,9 +269,9 @@ export VERACRYPT_KEYFILES='/mnt/key1,/home/user/.key2,/etc/backup.key'
 **No authentication method:**
 ```
 [ERROR] No authentication method specified!
-[ERROR] Please set either VERACRYPT_PASSWORD or VERACRYPT_KEYFILES environment variable.
+[ERROR] Please set VERACRYPT_PASSWORD and/or VERACRYPT_KEYFILES environment variable.
 ```
-**Solution:** Set one of the required environment variables.
+**Solution:** Set at least one of the authentication environment variables.
 
 **Container already exists:**
 ```
