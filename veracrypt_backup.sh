@@ -126,6 +126,19 @@ if [ "$FORCE_OVERWRITE" = true ] && [ "$SKIP_IF_EXISTS" = true ]; then
     exit 1
 fi
 
+# Function to validate keyfiles exist
+validate_keyfiles() {
+    for keyfile in "${KEYFILES_ARRAY[@]}"; do
+        # Trim whitespace
+        keyfile=$(echo "$keyfile" | xargs)
+        if [ ! -f "$keyfile" ]; then
+            print_error "Keyfile does not exist: $keyfile"
+            exit 1
+        fi
+        print_info "  - Keyfile found: $keyfile"
+    done
+}
+
 # Validate authentication method
 USE_PASSWORD=false
 USE_KEYFILES=false
@@ -137,17 +150,7 @@ if [ -n "${VERACRYPT_PASSWORD:-}" ] && [ -n "${VERACRYPT_KEYFILES:-}" ]; then
     USE_KEYFILES=true
     IFS=',' read -ra KEYFILES_ARRAY <<< "$VERACRYPT_KEYFILES"
     print_info "Using layered authentication (password + ${#KEYFILES_ARRAY[@]} keyfile(s))"
-    
-    # Validate each keyfile exists
-    for keyfile in "${KEYFILES_ARRAY[@]}"; do
-        # Trim whitespace
-        keyfile=$(echo "$keyfile" | xargs)
-        if [ ! -f "$keyfile" ]; then
-            print_error "Keyfile does not exist: $keyfile"
-            exit 1
-        fi
-        print_info "  - Keyfile found: $keyfile"
-    done
+    validate_keyfiles
 elif [ -n "${VERACRYPT_PASSWORD:-}" ]; then
     USE_PASSWORD=true
     print_info "Using password authentication"
@@ -156,17 +159,7 @@ elif [ -n "${VERACRYPT_KEYFILES:-}" ]; then
     # Split comma-separated keyfiles into array
     IFS=',' read -ra KEYFILES_ARRAY <<< "$VERACRYPT_KEYFILES"
     print_info "Using keyfile authentication (${#KEYFILES_ARRAY[@]} keyfile(s))"
-    
-    # Validate each keyfile exists
-    for keyfile in "${KEYFILES_ARRAY[@]}"; do
-        # Trim whitespace
-        keyfile=$(echo "$keyfile" | xargs)
-        if [ ! -f "$keyfile" ]; then
-            print_error "Keyfile does not exist: $keyfile"
-            exit 1
-        fi
-        print_info "  - Keyfile found: $keyfile"
-    done
+    validate_keyfiles
 else
     print_error "No authentication method specified!"
     print_error "Please set VERACRYPT_PASSWORD and/or VERACRYPT_KEYFILES environment variable."
@@ -211,12 +204,8 @@ if [ -n "$EXACT_PATH" ]; then
         fi
         CONTAINER_DIR="$(cd "$WORKING_DIR" && pwd)"
     else
-        # Default: save container in the same directory as the path (or parent if it's a file)
-        if [ -d "$EXACT_PATH" ]; then
-            CONTAINER_DIR="$(dirname "$EXACT_PATH")"
-        else
-            CONTAINER_DIR="$(dirname "$EXACT_PATH")"
-        fi
+        # Default: save container in the parent directory of the path
+        CONTAINER_DIR="$(dirname "$EXACT_PATH")"
     fi
     
     # Determine container name based on basename and current YYYYMM
