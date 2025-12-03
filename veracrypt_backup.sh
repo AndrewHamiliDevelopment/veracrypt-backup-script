@@ -42,21 +42,37 @@ usage() {
     echo "Options:"
     echo "  -f, --force          Force overwrite if container already exists"
     echo "  -s, --skip           Skip backup if container already exists (useful for cron)"
+    echo "  -p, --path PATH      Back up a specific file or directory path directly (bypasses YYYY/MM layout)"
     echo "  -h, --help           Show this help message"
     echo ""
-    echo "Environment Variables (REQUIRED - must set ONE of these):"
+    echo "Environment Variables (REQUIRED - must set at least ONE):"
     echo "  VERACRYPT_PASSWORD   Password string for container encryption"
     echo "  VERACRYPT_KEYFILES   Comma-separated paths to keyfiles (e.g., /path/key1,/path/key2)"
     echo ""
+    echo "  Note: Both VERACRYPT_PASSWORD and VERACRYPT_KEYFILES can be set together for layered"
+    echo "        authentication. The script will use both password and keyfiles when mounting."
+    echo ""
     echo "Examples:"
+    echo "  # Password-only authentication"
     echo "  export VERACRYPT_PASSWORD='MySecurePassword123'"
     echo "  $0 /backup/data"
     echo ""
+    echo "  # Keyfile-only authentication"
     echo "  export VERACRYPT_KEYFILES='/mnt/securekey,/home/user/.key2'"
     echo "  $0 --skip /backup/data"
     echo ""
+    echo "  # Layered authentication (password + keyfiles)"
+    echo "  export VERACRYPT_PASSWORD='MySecurePassword123'"
     echo "  export VERACRYPT_KEYFILES='/mnt/securekey'"
-    echo "  $0 --force /backup/data"
+    echo "  $0 /backup/data"
+    echo ""
+    echo "  # Back up a specific path directly"
+    echo "  export VERACRYPT_PASSWORD='MySecurePassword123'"
+    echo "  $0 --path /home/user/important-docs"
+    echo ""
+    echo "  # Back up a specific file"
+    echo "  export VERACRYPT_KEYFILES='/mnt/securekey'"
+    echo "  $0 --path /home/user/database.sql --force"
     echo ""
     exit 1
 }
@@ -65,6 +81,7 @@ usage() {
 FORCE_OVERWRITE=false
 SKIP_IF_EXISTS=false
 WORKING_DIR=""
+EXACT_PATH=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -78,6 +95,14 @@ while [ $# -gt 0 ]; do
         -s|--skip)
             SKIP_IF_EXISTS=true
             shift
+            ;;
+        -p|--path)
+            if [ -z "${2:-}" ]; then
+                print_error "Option $1 requires an argument"
+                usage
+            fi
+            EXACT_PATH="$2"
+            shift 2
             ;;
         -*)
             print_error "Unknown option: $1"
@@ -95,11 +120,6 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Set default working directory if not specified
-if [ -z "$WORKING_DIR" ]; then
-    WORKING_DIR="$(pwd)"
-fi
-
 # Check for conflicting options
 if [ "$FORCE_OVERWRITE" = true ] && [ "$SKIP_IF_EXISTS" = true ]; then
     print_error "Cannot use both --force and --skip options together!"
@@ -112,9 +132,22 @@ USE_KEYFILES=false
 KEYFILES_ARRAY=()
 
 if [ -n "${VERACRYPT_PASSWORD:-}" ] && [ -n "${VERACRYPT_KEYFILES:-}" ]; then
-    print_error "Both VERACRYPT_PASSWORD and VERACRYPT_KEYFILES are set!"
-    print_error "Please set only ONE authentication method."
-    exit 1
+    # Both authentication methods provided - use layered authentication
+    USE_PASSWORD=true
+    USE_KEYFILES=true
+    IFS=',' read -ra KEYFILES_ARRAY <<< "$VERACRYPT_KEYFILES"
+    print_info "Using layered authentication (password + ${#KEYFILES_ARRAY[@]} keyfile(s))"
+    
+    # Validate each keyfile exists
+    for keyfile in "${KEYFILES_ARRAY[@]}"; do
+        # Trim whitespace
+        keyfile=$(echo "$keyfile" | xargs)
+        if [ ! -f "$keyfile" ]; then
+            print_error "Keyfile does not exist: $keyfile"
+            exit 1
+        fi
+        print_info "  - Keyfile found: $keyfile"
+    done
 elif [ -n "${VERACRYPT_PASSWORD:-}" ]; then
     USE_PASSWORD=true
     print_info "Using password authentication"
@@ -136,32 +169,87 @@ elif [ -n "${VERACRYPT_KEYFILES:-}" ]; then
     done
 else
     print_error "No authentication method specified!"
-    print_error "Please set either VERACRYPT_PASSWORD or VERACRYPT_KEYFILES environment variable."
+    print_error "Please set VERACRYPT_PASSWORD and/or VERACRYPT_KEYFILES environment variable."
     echo ""
     echo "Examples:"
     echo "  export VERACRYPT_PASSWORD='MySecurePassword123'"
     echo "  export VERACRYPT_KEYFILES='/mnt/securekey'"
     echo "  export VERACRYPT_KEYFILES='/mnt/key1,/mnt/key2,/home/user/.key3'"
+    echo ""
+    echo "  # For layered authentication, set both:"
+    echo "  export VERACRYPT_PASSWORD='MySecurePassword123'"
+    echo "  export VERACRYPT_KEYFILES='/mnt/securekey'"
     exit 1
 fi
 
-# Validate working directory
-if [ ! -d "$WORKING_DIR" ]; then
-    print_error "Working directory '$WORKING_DIR' does not exist!"
-    exit 1
+# Mode flag: exact path mode vs. YYYY/MM directory mode
+EXACT_PATH_MODE=false
+
+# If --path is provided, it takes precedence over WORKING_DIRECTORY
+if [ -n "$EXACT_PATH" ]; then
+    EXACT_PATH_MODE=true
+    
+    # Validate exact path exists
+    if [ ! -e "$EXACT_PATH" ]; then
+        print_error "Path '$EXACT_PATH' does not exist!"
+        exit 1
+    fi
+    
+    # Convert to absolute path
+    if [ -d "$EXACT_PATH" ]; then
+        EXACT_PATH="$(cd "$EXACT_PATH" && pwd)"
+    else
+        EXACT_PATH="$(cd "$(dirname "$EXACT_PATH")" && pwd)/$(basename "$EXACT_PATH")"
+    fi
+    
+    # Determine container directory (where to save the container)
+    if [ -n "$WORKING_DIR" ]; then
+        # If WORKING_DIR is provided alongside --path, use it as the output directory
+        if [ ! -d "$WORKING_DIR" ]; then
+            print_error "Output directory '$WORKING_DIR' does not exist!"
+            exit 1
+        fi
+        CONTAINER_DIR="$(cd "$WORKING_DIR" && pwd)"
+    else
+        # Default: save container in the same directory as the path (or parent if it's a file)
+        if [ -d "$EXACT_PATH" ]; then
+            CONTAINER_DIR="$(dirname "$EXACT_PATH")"
+        else
+            CONTAINER_DIR="$(dirname "$EXACT_PATH")"
+        fi
+    fi
+    
+    # Determine container name based on basename and current YYYYMM
+    BASENAME=$(basename "$EXACT_PATH")
+    CURRENT_YYYYMM=$(date +%Y%m)
+    CONTAINER_NAME="${CONTAINER_DIR}/${BASENAME}-${CURRENT_YYYYMM}.imgc"
+    TARGET_DIR="$EXACT_PATH"
+    
+    MOUNT_POINT="/tmp/veracrypt_mount_$$"
+else
+    # Set default working directory if not specified (only for YYYY/MM mode)
+    if [ -z "$WORKING_DIR" ]; then
+        WORKING_DIR="$(pwd)"
+    fi
+    
+    # Validate working directory for YYYY/MM mode
+    if [ ! -d "$WORKING_DIR" ]; then
+        print_error "Working directory '$WORKING_DIR' does not exist!"
+        exit 1
+    fi
+    
+    # Convert to absolute path
+    WORKING_DIR="$(cd "$WORKING_DIR" && pwd)"
+    
+    # Get previous month and year
+    # This handles year rollover correctly (e.g., if current is January, previous is December of last year)
+    PREV_MONTH=$(date -d "last month" +%m)
+    PREV_YEAR=$(date -d "last month" +%Y)
+    
+    TARGET_DIR="${WORKING_DIR}/${PREV_YEAR}/${PREV_MONTH}"
+    CONTAINER_NAME="${WORKING_DIR}/${PREV_YEAR}${PREV_MONTH}.imgc"
+    MOUNT_POINT="/tmp/veracrypt_mount_$$"
 fi
-
-# Convert to absolute path
-WORKING_DIR="$(cd "$WORKING_DIR" && pwd)"
-
-# Get previous month and year
-# This handles year rollover correctly (e.g., if current is January, previous is December of last year)
-PREV_MONTH=$(date -d "last month" +%m)
-PREV_YEAR=$(date -d "last month" +%Y)
-
-TARGET_DIR="${WORKING_DIR}/${PREV_YEAR}/${PREV_MONTH}"
-CONTAINER_NAME="${WORKING_DIR}/${PREV_YEAR}${PREV_MONTH}.imgc"
-MOUNT_POINT="/tmp/veracrypt_mount_$$"
 
 # Cleanup function
 cleanup() {
@@ -197,26 +285,64 @@ get_human_size() {
 
 # Main script starts here
 print_info "Starting VeraCrypt backup process..."
-print_info "Working directory: $WORKING_DIR"
-print_info "Target: Previous month's data (${PREV_YEAR}-${PREV_MONTH})"
 
-# Step 1: Check current directory's free space
-print_info "Checking free space in working directory..."
-FREE_SPACE=$(get_free_space "$WORKING_DIR")
+if [ "$EXACT_PATH_MODE" = true ]; then
+    print_info "Mode: Exact path backup"
+    print_info "Source path: $TARGET_DIR"
+    print_info "Container: $CONTAINER_NAME"
+else
+    print_info "Mode: YYYY/MM directory backup"
+    print_info "Working directory: $WORKING_DIR"
+    print_info "Target: Previous month's data (${PREV_YEAR}-${PREV_MONTH})"
+fi
+
+# Step 1: Check free space in the container output directory
+if [ "$EXACT_PATH_MODE" = true ]; then
+    print_info "Checking free space in output directory..."
+    FREE_SPACE=$(get_free_space "$CONTAINER_DIR")
+else
+    print_info "Checking free space in working directory..."
+    FREE_SPACE=$(get_free_space "$WORKING_DIR")
+fi
 print_info "Free space available: $(get_human_size $FREE_SPACE)"
 
-# Step 2: Check if {year}/{month} directory exists
-print_info "Checking if directory '$TARGET_DIR' exists..."
-if [ ! -d "$TARGET_DIR" ]; then
-    print_error "Directory '$TARGET_DIR' does not exist!"
-    exit 1
+# Step 2: Check if source exists
+if [ "$EXACT_PATH_MODE" = true ]; then
+    # In exact path mode, TARGET_DIR can be a file or directory
+    if [ -d "$TARGET_DIR" ]; then
+        print_info "Checking if directory '$TARGET_DIR' exists..."
+        print_success "Directory '$TARGET_DIR' found"
+    elif [ -f "$TARGET_DIR" ]; then
+        print_info "Checking if file '$TARGET_DIR' exists..."
+        print_success "File '$TARGET_DIR' found"
+    else
+        print_error "Path '$TARGET_DIR' does not exist!"
+        exit 1
+    fi
+else
+    # In YYYY/MM mode, TARGET_DIR must be a directory
+    print_info "Checking if directory '$TARGET_DIR' exists..."
+    if [ ! -d "$TARGET_DIR" ]; then
+        print_error "Directory '$TARGET_DIR' does not exist!"
+        exit 1
+    fi
+    print_success "Directory '$TARGET_DIR' found"
 fi
-print_success "Directory '$TARGET_DIR' found"
 
-# Step 3: Check folder size and compare with free space
-print_info "Calculating size of '$TARGET_DIR'..."
-DIR_SIZE=$(get_dir_size "$TARGET_DIR")
-print_info "Directory size: $(get_human_size $DIR_SIZE)"
+# Step 3: Calculate size and compare with free space
+if [ -d "$TARGET_DIR" ]; then
+    print_info "Calculating size of '$TARGET_DIR'..."
+    DIR_SIZE=$(get_dir_size "$TARGET_DIR")
+    print_info "Directory size: $(get_human_size $DIR_SIZE)"
+else
+    # It's a file
+    print_info "Calculating size of '$TARGET_DIR'..."
+    FILE_SIZE_BYTES=$(stat -c "%s" "$TARGET_DIR" 2>/dev/null || stat -f "%z" "$TARGET_DIR" 2>/dev/null)
+    DIR_SIZE=$((FILE_SIZE_BYTES / 1024))
+    # Ensure at least 1 KB
+    [ "$DIR_SIZE" -lt 1 ] && DIR_SIZE=1
+    print_info "File size: $(get_human_size $DIR_SIZE)"
+fi
 
 # Calculate required container size (directory size + 12MB in KB)
 ADDITIONAL_SIZE=$((12 * 1024))  # 12MB in KB
@@ -262,8 +388,23 @@ print_info "Creating VeraCrypt container '$CONTAINER_NAME' with NTFS filesystem.
 # Convert KB to bytes for VeraCrypt (multiply by 1024)
 CONTAINER_SIZE_BYTES=$((CONTAINER_SIZE * 1024))
 
-if [ "$USE_PASSWORD" = true ]; then
-    # Use password authentication
+if [ "$USE_PASSWORD" = true ] && [ "$USE_KEYFILES" = true ]; then
+    # Use layered authentication (password + keyfiles)
+    KEYFILES_PARAM=$(IFS=, ; echo "${KEYFILES_ARRAY[*]}")
+    echo -n "$VERACRYPT_PASSWORD" | veracrypt --text \
+        --create "$CONTAINER_NAME" \
+        --volume-type=normal \
+        --size="$CONTAINER_SIZE_BYTES" \
+        --encryption=AES \
+        --hash=sha512 \
+        --filesystem=NTFS \
+        --keyfiles="$KEYFILES_PARAM" \
+        --pim=0 \
+        --random-source=/dev/urandom \
+        --stdin \
+        --non-interactive
+elif [ "$USE_PASSWORD" = true ]; then
+    # Use password authentication only
     echo -n "$VERACRYPT_PASSWORD" | veracrypt --text \
         --create "$CONTAINER_NAME" \
         --volume-type=normal \
@@ -276,7 +417,7 @@ if [ "$USE_PASSWORD" = true ]; then
         --stdin \
         --non-interactive
 else
-    # Use keyfile authentication
+    # Use keyfile authentication only
     KEYFILES_PARAM=$(IFS=, ; echo "${KEYFILES_ARRAY[*]}")
     veracrypt --text \
         --create "$CONTAINER_NAME" \
@@ -306,8 +447,18 @@ mkdir -p "$MOUNT_POINT"
 # Mount the container
 print_info "Mounting VeraCrypt container..."
 
-if [ "$USE_PASSWORD" = true ]; then
-    # Mount with password
+if [ "$USE_PASSWORD" = true ] && [ "$USE_KEYFILES" = true ]; then
+    # Mount with layered authentication (password + keyfiles)
+    KEYFILES_PARAM=$(IFS=, ; echo "${KEYFILES_ARRAY[*]}")
+    echo -n "$VERACRYPT_PASSWORD" | veracrypt --text \
+        --keyfiles="$KEYFILES_PARAM" \
+        --pim=0 \
+        --protect-hidden=no \
+        --stdin \
+        "$CONTAINER_NAME" \
+        "$MOUNT_POINT"
+elif [ "$USE_PASSWORD" = true ]; then
+    # Mount with password only
     echo -n "$VERACRYPT_PASSWORD" | veracrypt --text \
         --pim=0 \
         --protect-hidden=no \
@@ -315,7 +466,7 @@ if [ "$USE_PASSWORD" = true ]; then
         "$CONTAINER_NAME" \
         "$MOUNT_POINT"
 else
-    # Mount with keyfiles
+    # Mount with keyfiles only
     KEYFILES_PARAM=$(IFS=, ; echo "${KEYFILES_ARRAY[*]}")
     veracrypt --text \
         --keyfiles="$KEYFILES_PARAM" \
@@ -334,41 +485,64 @@ else
 fi
 
 # Copy files preserving timestamps and print each file
-print_info "Copying files from '$TARGET_DIR' to container..."
+print_info "Copying from '$TARGET_DIR' to container..."
 print_info "Transfer log:"
 echo ""
 
-# Count total files and directories
-TOTAL_ITEMS=$(find "$TARGET_DIR" -mindepth 1 | wc -l)
-print_info "Total items to transfer: $TOTAL_ITEMS"
-echo ""
-
-# Copy with verbose output showing each file
-find "$TARGET_DIR" -mindepth 1 | while read -r item; do
-    RELATIVE_PATH="${item#$TARGET_DIR/}"
+if [ -d "$TARGET_DIR" ]; then
+    # TARGET_DIR is a directory - copy contents
+    # Count total files and directories
+    TOTAL_ITEMS=$(find "$TARGET_DIR" -mindepth 1 | wc -l)
+    print_info "Total items to transfer: $TOTAL_ITEMS"
+    echo ""
     
-    if [ -d "$item" ]; then
-        # Create directory
-        mkdir -p "$MOUNT_POINT/$RELATIVE_PATH"
-        print_file "Creating directory: $RELATIVE_PATH"
-    elif [ -f "$item" ]; then
-        # Copy file with timestamp preservation
-        cp --preserve=timestamps "$item" "$MOUNT_POINT/$RELATIVE_PATH"
-        FILE_SIZE=$(stat -f "%z" "$item" 2>/dev/null || stat -c "%s" "$item" 2>/dev/null)
-        if [ -n "$FILE_SIZE" ]; then
-            if [ "$FILE_SIZE" -lt 1024 ]; then
-                SIZE_STR="${FILE_SIZE}B"
-            elif [ "$FILE_SIZE" -lt 1048576 ]; then
-                SIZE_STR="$(echo "scale=2; $FILE_SIZE/1024" | bc)KB"
+    # Copy with verbose output showing each file
+    find "$TARGET_DIR" -mindepth 1 | while read -r item; do
+        RELATIVE_PATH="${item#$TARGET_DIR/}"
+        
+        if [ -d "$item" ]; then
+            # Create directory
+            mkdir -p "$MOUNT_POINT/$RELATIVE_PATH"
+            print_file "Creating directory: $RELATIVE_PATH"
+        elif [ -f "$item" ]; then
+            # Copy file with timestamp preservation
+            cp --preserve=timestamps "$item" "$MOUNT_POINT/$RELATIVE_PATH"
+            FILE_SIZE=$(stat -f "%z" "$item" 2>/dev/null || stat -c "%s" "$item" 2>/dev/null)
+            if [ -n "$FILE_SIZE" ]; then
+                if [ "$FILE_SIZE" -lt 1024 ]; then
+                    SIZE_STR="${FILE_SIZE}B"
+                elif [ "$FILE_SIZE" -lt 1048576 ]; then
+                    SIZE_STR="$(echo "scale=2; $FILE_SIZE/1024" | bc)KB"
+                else
+                    SIZE_STR="$(echo "scale=2; $FILE_SIZE/1048576" | bc)MB"
+                fi
+                print_file "Copied: $RELATIVE_PATH ($SIZE_STR)"
             else
-                SIZE_STR="$(echo "scale=2; $FILE_SIZE/1048576" | bc)MB"
+                print_file "Copied: $RELATIVE_PATH"
             fi
-            print_file "Copied: $RELATIVE_PATH ($SIZE_STR)"
-        else
-            print_file "Copied: $RELATIVE_PATH"
         fi
+    done
+else
+    # TARGET_DIR is a single file - copy the file
+    FILENAME=$(basename "$TARGET_DIR")
+    print_info "Total items to transfer: 1"
+    echo ""
+    
+    cp --preserve=timestamps "$TARGET_DIR" "$MOUNT_POINT/$FILENAME"
+    FILE_SIZE=$(stat -f "%z" "$TARGET_DIR" 2>/dev/null || stat -c "%s" "$TARGET_DIR" 2>/dev/null)
+    if [ -n "$FILE_SIZE" ]; then
+        if [ "$FILE_SIZE" -lt 1024 ]; then
+            SIZE_STR="${FILE_SIZE}B"
+        elif [ "$FILE_SIZE" -lt 1048576 ]; then
+            SIZE_STR="$(echo "scale=2; $FILE_SIZE/1024" | bc)KB"
+        else
+            SIZE_STR="$(echo "scale=2; $FILE_SIZE/1048576" | bc)MB"
+        fi
+        print_file "Copied: $FILENAME ($SIZE_STR)"
+    else
+        print_file "Copied: $FILENAME"
     fi
-done
+fi
 
 COPY_EXIT_CODE=$?
 
