@@ -76,7 +76,7 @@ generate_hashes() {
 get_directory_size() {
     local dir="$1"
     
-    info "Calculating directory size: $dir"
+    info "Calculating directory size: $dir" >&2
     
     # Get size in bytes (works on both Linux and macOS)
     if [[ "$OSTYPE" == "darwin"* ]]; then
