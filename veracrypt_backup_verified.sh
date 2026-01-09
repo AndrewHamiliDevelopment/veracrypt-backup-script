@@ -97,8 +97,8 @@ create_veracrypt_container() {
     local password="$3"
     local keyfile="$4"
     
-    # Add 128MB (134217728 bytes) to the size
-    local total_size=$((size_bytes + 134217728))
+    # Add 256MB (268435456 bytes) to the size
+    local total_size=$((size_bytes + 268435456))
     
     # Convert to MB for VeraCrypt (round up)
     local size_mb=$(( (total_size + 1048575) / 1048576 ))
