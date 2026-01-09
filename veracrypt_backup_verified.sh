@@ -143,8 +143,8 @@ mount_veracrypt_container() {
         --protect-hidden=no \
         || error_exit "Failed to mount VeraCrypt container"
     
-    # Change ownership to current user
-    sudo chown -R $(whoami):$(id -gn) "$mount_point"
+    # Change ownership to current user (ignore errors for filesystems like exFAT that don't support it)
+    sudo chown -R $(whoami):$(id -gn) "$mount_point" 2>/dev/null || true
     
     info "VeraCrypt container mounted successfully"
 }
