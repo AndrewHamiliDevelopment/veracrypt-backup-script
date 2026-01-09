@@ -111,7 +111,7 @@ create_veracrypt_container() {
         --password="$password" \
         --encryption=AES \
         --hash=SHA-512 \
-        --filesystem=ext4 \
+        --filesystem=exfat \
         --pim=0 \
         --keyfiles="$keyfile" \
         --random-source=/dev/urandom \
