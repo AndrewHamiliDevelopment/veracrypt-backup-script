@@ -2,9 +2,9 @@
 
 # veracrypt_backup_verified.sh
 # Creates a VeraCrypt container backup with SHA256 integrity verification
-# Usage: ./veracrypt_backup_verified.sh --source <dir> [--password <pass>] [--keyfile <file>]
+# Usage: ./veracrypt_backup_verified.sh --source <dir> [--destination <dir>] [--password <pass>] [--keyfile <file>]
 # Note: Either --password or --keyfile (or both) must be provided
-# Note: All containers are stored in /mnt
+# Note: Containers are stored in /mnt by default (use --destination to override)
 
 set -e  # Exit on error
 
@@ -217,6 +217,7 @@ main() {
     
     # Initialize variables
     SOURCE_DIR=""
+    DEST_DIR=""
     PASSWORD=""
     KEYFILE=""
     CONTAINER_NAME=""
@@ -226,6 +227,10 @@ main() {
         case $1 in
             --source|-s)
                 SOURCE_DIR="$2"
+                shift 2
+                ;;
+            --destination|-d)
+                DEST_DIR="$2"
                 shift 2
                 ;;
             --password|-p)
@@ -241,25 +246,27 @@ main() {
                 shift 2
                 ;;
             --help|-h)
-                echo "Usage: $0 --source <directory> [--password <password>] [--keyfile <file>] [--container-name <name>]"
+                echo "Usage: $0 --source <directory> [--destination <directory>] [--password <password>] [--keyfile <file>] [--container-name <name>]"
                 echo ""
                 echo "Options:"
                 echo "  -s, --source <directory>        Directory containing files to backup (required)"
+                echo "  -d, --destination <directory>   Directory where container will be stored (optional, default: /mnt)"
                 echo "  -p, --password <password>       Password for the VeraCrypt container (optional)"
                 echo "  -k, --keyfile <file>            Path to keyfile(s) - comma-separated for multiple (optional)"
                 echo "  -n, --container-name <name>     Custom name for the container file (optional)"
                 echo "  -h, --help                      Show this help message"
                 echo ""
                 echo "Note: Either --password or --keyfile (or both) must be provided."
-                echo "Note: All VeraCrypt containers are stored in /mnt"
+                echo "Note: If --destination is not provided, containers are stored in /mnt"
                 echo "Note: If --container-name is not provided, the source directory name will be used."
                 echo "      Spaces in names are replaced with dashes."
                 echo ""
                 echo "Examples:"
                 echo "  sudo $0 --source /data --password 'MyPass123'"
+                echo "  sudo $0 --source /data --destination /backup --password 'MyPass123'"
                 echo "  sudo $0 --source /data --keyfile /path/to/key.key"
-                echo "  sudo $0 -s /data -p 'MyPass123' -k /key.key"
-                echo "  sudo $0 --source /data --keyfile key1.key,key2.key"
+                echo "  sudo $0 -s /data -d /backup -p 'MyPass123' -k /key.key"
+                echo "  sudo $0 --source /data --destination /mnt/pool --keyfile key1.key,key2.key"
                 echo "  sudo $0 --source /data --password 'MyPass' --container-name mybackup"
                 exit 0
                 ;;
@@ -279,6 +286,12 @@ main() {
         error_exit "Either --password or --keyfile (or both) must be provided. Use --help for usage information."
     fi
     
+    # Set default destination directory if not provided
+    if [ -z "$DEST_DIR" ]; then
+        DEST_DIR="/mnt"
+        info "Destination not specified, using default: /mnt"
+    fi
+    
     # Generate container name if not provided
     if [ -z "$CONTAINER_NAME" ]; then
         # Get basename of source directory and replace spaces with dashes
@@ -289,8 +302,6 @@ main() {
         CONTAINER_NAME=$(echo "$CONTAINER_NAME" | tr ' ' '-')
     fi
     
-    # Set destination directory to /mnt
-    DEST_DIR="/mnt"
     MOUNT_POINT="/mnt/vera"
     CONTAINER_FILE="${CONTAINER_NAME}_$(date +%Y%m%d_%H%M%S).vc"
     CONTAINER_PATH="$DEST_DIR/$CONTAINER_FILE"
