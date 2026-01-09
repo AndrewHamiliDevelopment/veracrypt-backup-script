@@ -168,7 +168,8 @@ copy_files_rsync() {
     
     info "Copying files from $source to $destination"
     
-    rsync -avh --progress "$source/" "$destination/" \
+    # Use rsync with timestamp preservation but without ownership/permissions for exFAT compatibility
+    rsync -rtvh --progress --no-perms --no-owner --no-group "$source/" "$destination/" \
         || error_exit "Failed to copy files with rsync"
     
     info "Files copied successfully"
