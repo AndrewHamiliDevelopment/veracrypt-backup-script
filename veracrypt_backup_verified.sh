@@ -115,6 +115,7 @@ create_veracrypt_container() {
         --pim=0 \
         --keyfiles="$keyfile" \
         --random-source=/dev/urandom \
+        --volume-type=normal \
         || error_exit "Failed to create VeraCrypt container"
     
     info "VeraCrypt container created successfully"
