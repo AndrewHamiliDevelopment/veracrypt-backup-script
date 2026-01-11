@@ -6,7 +6,8 @@ A bash script that automatically creates encrypted VeraCrypt containers from mon
 
 - 🔐 **Secure Encryption**: Creates NTFS-formatted VeraCrypt containers with AES encryption and SHA-512 hashing
 - 📅 **Automatic Date Handling**: Automatically backs up previous month's data (handles year rollover correctly)
-- 🔑 **Flexible Authentication**: Supports both password-based and keyfile-based authentication (single or multiple keyfiles)
+- 🔑 **Flexible Authentication**: Supports password-based, keyfile-based, or layered authentication (password + keyfiles together)
+- 📁 **Exact Path Mode**: Back up any specific file or directory directly with `--path` option
 - 💾 **Smart Sizing**: Automatically calculates container size based on source data + 12MB buffer
 - 🔄 **Cron-Friendly**: Built-in skip mode for safe automated retries
 - 📊 **Verbose Logging**: Prints every file being transferred with size information
@@ -34,7 +35,7 @@ cd veracrypt-backup-script
 chmod +x veracrypt_backup.sh
 ```
 
-3. Set up authentication (choose ONE method):
+3. Set up authentication (choose at least ONE method, or both for layered authentication):
 
 **Option A - Using Password:**
 ```bash
@@ -51,6 +52,12 @@ export VERACRYPT_KEYFILES='/path/to/your/keyfile'
 export VERACRYPT_KEYFILES='/path/to/key1,/path/to/key2,/path/to/key3'
 ```
 
+**Option D - Layered Authentication (Password + Keyfiles):**
+```bash
+export VERACRYPT_PASSWORD='YourSecurePassword123'
+export VERACRYPT_KEYFILES='/path/to/your/keyfile'
+```
+
 ## Usage
 
 ### Basic Syntax
@@ -63,6 +70,7 @@ export VERACRYPT_KEYFILES='/path/to/key1,/path/to/key2,/path/to/key3'
 
 - `-f, --force` - Force overwrite if container already exists
 - `-s, --skip` - Skip backup if container already exists (recommended for cron jobs)
+- `-p, --path PATH` - Back up a specific file or directory directly (bypasses YYYY/MM layout)
 - `-h, --help` - Show help message
 
 ### Examples
@@ -91,9 +99,41 @@ export VERACRYPT_KEYFILES='/mnt/key1,/mnt/key2'
 ./veracrypt_backup.sh --skip /backup/data
 ```
 
+**Use layered authentication (password + keyfiles):**
+```bash
+export VERACRYPT_PASSWORD='MyPassword'
+export VERACRYPT_KEYFILES='/mnt/securekey'
+./veracrypt_backup.sh /backup/data
+```
+
+**Back up a specific directory directly (bypasses YYYY/MM layout):**
+```bash
+export VERACRYPT_PASSWORD='MyPassword'
+./veracrypt_backup.sh --path /home/user/important-docs
+# Creates: important-docs-YYYYMM.imgc
+```
+
+**Back up a specific file:**
+```bash
+export VERACRYPT_KEYFILES='/mnt/securekey'
+./veracrypt_backup.sh --path /home/user/database.sql --force
+# Creates: database.sql-YYYYMM.imgc
+```
+
+**Combine --path with output directory:**
+```bash
+export VERACRYPT_PASSWORD='MyPassword'
+./veracrypt_backup.sh --path /home/user/documents /backup/containers
+# Creates: /backup/containers/documents-YYYYMM.imgc
+```
+
 ## How It Works
 
 ### Directory Structure
+
+The script supports two modes:
+
+#### 1. YYYY/MM Directory Mode (Default)
 
 The script expects the following directory structure:
 
@@ -108,9 +148,23 @@ The script expects the following directory structure:
     └── 01/  (January data)
 ```
 
+#### 2. Exact Path Mode (--path option)
+
+When using `--path`, you can back up any file or directory directly without requiring the YYYY/MM structure:
+
+```bash
+# Back up a directory
+./veracrypt_backup.sh --path /home/user/documents
+# Creates: documents-YYYYMM.imgc (using current year/month)
+
+# Back up a single file
+./veracrypt_backup.sh --path /home/user/important.db
+# Creates: important.db-YYYYMM.imgc
+```
+
 ### Workflow
 
-When run on the 1st of each month, the script:
+**YYYY/MM Mode:** When run on the 1st of each month, the script:
 
 1. **Determines Previous Month**: Calculates previous month/year (handles year rollover)
 2. **Checks Free Space**: Verifies sufficient disk space is available
@@ -231,6 +285,24 @@ export VERACRYPT_KEYFILES='/mnt/key1,/home/user/.key2,/etc/backup.key'
 - Requires managing keyfile(s)
 - Keyfiles must be accessible when script runs
 
+### Layered Authentication (Password + Keyfiles)
+
+For maximum security, you can use both password and keyfiles together. The script will require both to create and mount the container:
+
+```bash
+export VERACRYPT_PASSWORD='YourSecurePassword123'
+export VERACRYPT_KEYFILES='/mnt/securekey,/home/user/.key2'
+```
+
+**Pros:**
+- Maximum security - requires both something you know (password) and something you have (keyfiles)
+- Protects against both password theft and keyfile theft
+- Ideal for highly sensitive data
+
+**Cons:**
+- More complex setup
+- Both password and keyfiles must be available when script runs
+
 ## Error Handling
 
 ### Common Errors
@@ -238,9 +310,9 @@ export VERACRYPT_KEYFILES='/mnt/key1,/home/user/.key2,/etc/backup.key'
 **No authentication method:**
 ```
 [ERROR] No authentication method specified!
-[ERROR] Please set either VERACRYPT_PASSWORD or VERACRYPT_KEYFILES environment variable.
+[ERROR] Please set VERACRYPT_PASSWORD and/or VERACRYPT_KEYFILES environment variable.
 ```
-**Solution:** Set one of the required environment variables.
+**Solution:** Set at least one of the required environment variables, or both for layered authentication.
 
 **Container already exists:**
 ```
