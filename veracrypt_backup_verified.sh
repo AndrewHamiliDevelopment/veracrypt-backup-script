@@ -61,8 +61,8 @@ generate_hashes() {
     
     info "Generating SHA256 hashes for: $dir" >&2
     
-    # Find all files (not directories) and generate SHA256 hash
-    find "$dir" -type f -print0 | sort -z | while IFS= read -r -d '' file; do
+    # Find all files (not directories) and generate SHA256 hash, excluding hidden files/folders
+    find "$dir" -type f -not -path '*/.*' -print0 | sort -z | while IFS= read -r -d '' file; do
         # Get relative path
         local rel_path="${file#$dir/}"
         # Generate hash and store with relative path
