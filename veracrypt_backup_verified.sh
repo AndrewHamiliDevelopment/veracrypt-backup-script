@@ -213,12 +213,12 @@ copy_files_rsync() {
     info "Copying files from $source to $destination"
     
     # Use rsync with timestamp preservation but without ownership/permissions for exFAT compatibility
-        find "$dir" -type f -print0 | sort -z | while IFS= read -r -d '' file; do
-            # Get file name only
-            local base_name="$(basename "$file")"
-            # Generate hash and store with file name only
-            sha256sum "$file" | sed "s|$file|$base_name|"
-        done > "$temp_file"
+    rsync -rtvh --progress --no-perms --no-owner --no-group "$source/" "$destination/" \
+        || error_exit "Failed to copy files with rsync"
+    
+    info "Files copied successfully"
+}
+
 # Compare two hash files
 compare_hashes() {
     local hash_file1="$1"
