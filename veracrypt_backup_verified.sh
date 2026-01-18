@@ -377,7 +377,7 @@ main() {
     
     # Step 8: Compare hashes
     if ! compare_hashes "$SOURCE_HASH_FILE" "$MOUNT_HASH_FILE"; then
-        error "Hash verification FAILED! Files do not match."
+        error_exit "Hash verification FAILED! Files do not match."
         
         # Show differences
         echo -e "\n${RED}Differences found:${NC}"
