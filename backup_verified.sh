@@ -237,15 +237,40 @@ main() {
     
     # Step 7: Compare hashes
     if ! compare_hashes "$SOURCE_HASH_FILE" "$DEST_HASH_FILE"; then
-        echo -e "\n${RED}Hash verification FAILED! Files do not match.${NC}"
-        
-        # Show differences
-        echo -e "\n${RED}Differences found:${NC}"
+        echo -e "${RED}ERROR: Hash verification FAILED! Files do not match.${NC}"
+        echo -e "\n${RED}Detailed differences:${NC}"
+        # Show a summary of missing, extra, and mismatched files
+        awk '{print $2" "$1}' "$SOURCE_HASH_FILE" | sort > /tmp/source_hash_sorted.txt
+        awk '{print $2" "$1}' "$DEST_HASH_FILE" | sort > /tmp/dest_hash_sorted.txt
+
+        # Find files missing in destination
+        comm -23 <(awk '{print $1}' /tmp/source_hash_sorted.txt) <(awk '{print $1}' /tmp/dest_hash_sorted.txt) > /tmp/missing_in_dest.txt
+        # Find files extra in destination
+        comm -13 <(awk '{print $1}' /tmp/source_hash_sorted.txt) <(awk '{print $1}' /tmp/dest_hash_sorted.txt) > /tmp/extra_in_dest.txt
+        # Find files with mismatched hashes
+        join -j 1 /tmp/source_hash_sorted.txt /tmp/dest_hash_sorted.txt | awk '$2 != $3 {print $1}' > /tmp/mismatched_hashes.txt
+
+        if [ -s /tmp/missing_in_dest.txt ]; then
+            echo -e "${YELLOW}Files present in source but missing in destination:${NC}"
+            cat /tmp/missing_in_dest.txt
+        fi
+        if [ -s /tmp/extra_in_dest.txt ]; then
+            echo -e "${YELLOW}Files present in destination but missing in source:${NC}"
+            cat /tmp/extra_in_dest.txt
+        fi
+        if [ -s /tmp/mismatched_hashes.txt ]; then
+            echo -e "${YELLOW}Files with mismatched hashes:${NC}"
+            cat /tmp/mismatched_hashes.txt
+        fi
+
+        # Show raw diff for reference
+        echo -e "\n${YELLOW}Raw diff output:${NC}"
         diff <(sort "$SOURCE_HASH_FILE") <(sort "$DEST_HASH_FILE") || true
-        
+
         # Cleanup temporary hash files
         rm -f "$SOURCE_HASH_FILE" "$DEST_HASH_FILE"
-        
+        rm -f /tmp/source_hash_sorted.txt /tmp/dest_hash_sorted.txt /tmp/missing_in_dest.txt /tmp/extra_in_dest.txt /tmp/mismatched_hashes.txt
+
         # Cleanup and exit with status 1
         cleanup_on_failure "$DEST_DIR"
         exit 1

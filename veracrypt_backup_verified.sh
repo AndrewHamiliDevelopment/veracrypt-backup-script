@@ -424,15 +424,40 @@ main() {
     
     # Step 9: Compare hashes
     if ! compare_hashes "$SOURCE_HASH_FILE" "$MOUNT_HASH_FILE"; then
-        error_exit "Hash verification FAILED! Files do not match."
-        
-        # Show differences
-        echo -e "\n${RED}Differences found:${NC}"
+        echo -e "${RED}ERROR: Hash verification FAILED! Files do not match.${NC}"
+        echo -e "\n${RED}Detailed differences:${NC}"
+        # Show a summary of missing, extra, and mismatched files
+        awk '{print $2" "$1}' "$SOURCE_HASH_FILE" | sort > /tmp/source_hash_sorted.txt
+        awk '{print $2" "$1}' "$MOUNT_HASH_FILE" | sort > /tmp/mount_hash_sorted.txt
+
+        # Find files missing in mount
+        comm -23 <(awk '{print $1}' /tmp/source_hash_sorted.txt) <(awk '{print $1}' /tmp/mount_hash_sorted.txt) > /tmp/missing_in_mount.txt
+        # Find files extra in mount
+        comm -13 <(awk '{print $1}' /tmp/source_hash_sorted.txt) <(awk '{print $1}' /tmp/mount_hash_sorted.txt) > /tmp/extra_in_mount.txt
+        # Find files with mismatched hashes
+        join -j 1 /tmp/source_hash_sorted.txt /tmp/mount_hash_sorted.txt | awk '$2 != $3 {print $1}' > /tmp/mismatched_hashes.txt
+
+        if [ -s /tmp/missing_in_mount.txt ]; then
+            echo -e "${YELLOW}Files present in source but missing in mount:${NC}"
+            cat /tmp/missing_in_mount.txt
+        fi
+        if [ -s /tmp/extra_in_mount.txt ]; then
+            echo -e "${YELLOW}Files present in mount but missing in source:${NC}"
+            cat /tmp/extra_in_mount.txt
+        fi
+        if [ -s /tmp/mismatched_hashes.txt ]; then
+            echo -e "${YELLOW}Files with mismatched hashes:${NC}"
+            cat /tmp/mismatched_hashes.txt
+        fi
+
+        # Show raw diff for reference
+        echo -e "\n${YELLOW}Raw diff output:${NC}"
         diff <(sort "$SOURCE_HASH_FILE") <(sort "$MOUNT_HASH_FILE") || true
-        
+
         # Cleanup temporary hash files
         rm -f "$SOURCE_HASH_FILE" "$MOUNT_HASH_FILE"
-        
+        rm -f /tmp/source_hash_sorted.txt /tmp/mount_hash_sorted.txt /tmp/missing_in_mount.txt /tmp/extra_in_mount.txt /tmp/mismatched_hashes.txt
+
         # Cleanup and exit with status 1
         cleanup_on_failure "$MOUNT_POINT" "$CONTAINER_PATH"
         exit 1
