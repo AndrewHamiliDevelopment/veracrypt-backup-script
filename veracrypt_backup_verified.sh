@@ -61,8 +61,8 @@ generate_hashes() {
     
     info "Generating SHA256 hashes for: $dir" >&2
     
-    # Find all files (not directories) and generate SHA256 hash
-    find "$dir" -type f -print0 | sort -z | while IFS= read -r -d '' file; do
+    # Find all files (not directories) and generate SHA256 hash, excluding hidden files/folders
+    find "$dir" -type f -not -path '*/.*' -print0 | sort -z | while IFS= read -r -d '' file; do
         # Get relative path
         local rel_path="${file#$dir/}"
         # Generate hash and store with relative path
@@ -88,6 +88,50 @@ get_directory_size() {
     fi
     
     echo "$size"
+}
+
+# Get available space at destination in bytes
+get_available_space() {
+    local dir="$1"
+    
+    info "Checking available space at: $dir" >&2
+    
+    # Get available space in bytes (works on both Linux and macOS)
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS - use df with -k and convert to bytes
+        local avail_kb=$(df -k "$dir" | tail -1 | awk '{print $4}')
+        local avail_bytes=$((avail_kb * 1024))
+    else
+        # Linux - use df with --output
+        local avail_bytes=$(df --output=avail -B1 "$dir" | tail -1 | tr -d ' ')
+    fi
+    
+    echo "$avail_bytes"
+}
+
+# Check if destination has enough space for container
+check_destination_space() {
+    local source_size="$1"
+    local dest_dir="$2"
+    
+    local available_space=$(get_available_space "$dest_dir")
+    
+    # Container size will be source_size + 256MB
+    local container_size=$((source_size + 268435456))
+    
+    # Add 10% buffer to container size for safety
+    local required_space=$((container_size + container_size / 10))
+    
+    info "Source size: $source_size bytes ($(( source_size / 1048576 ))MB)"
+    info "Container size: $container_size bytes ($(( container_size / 1048576 ))MB)"
+    info "Required space (with 10% buffer): $required_space bytes ($(( required_space / 1048576 ))MB)"
+    info "Available space: $available_space bytes ($(( available_space / 1048576 ))MB)"
+    
+    if [ "$available_space" -lt "$required_space" ]; then
+        error_exit "Insufficient space at destination. Required: $(( required_space / 1048576 ))MB, Available: $(( available_space / 1048576 ))MB"
+    fi
+    
+    info "Destination has sufficient space"
 }
 
 # Create VeraCrypt container
@@ -364,7 +408,10 @@ main() {
     SOURCE_SIZE=$(get_directory_size "$SOURCE_DIR")
     info "Source directory size: $SOURCE_SIZE bytes ($(( SOURCE_SIZE / 1048576 ))MB)"
     
-    # Step 5: Create and mount VeraCrypt container
+    # Step 5: Check if destination has enough space
+    check_destination_space "$SOURCE_SIZE" "$DEST_DIR"
+    
+    # Step 6: Create and mount VeraCrypt container
     create_veracrypt_container "$CONTAINER_PATH" "$SOURCE_SIZE" "$PASSWORD" "$KEYFILE"
     mount_veracrypt_container "$CONTAINER_PATH" "$MOUNT_POINT" "$PASSWORD" "$KEYFILE"
     
@@ -375,7 +422,7 @@ main() {
     MOUNT_HASH_FILE=$(generate_hashes "$MOUNT_POINT")
     info "Mount point hashes stored in: $MOUNT_HASH_FILE"
     
-    # Step 8: Compare hashes
+    # Step 9: Compare hashes
     if ! compare_hashes "$SOURCE_HASH_FILE" "$MOUNT_HASH_FILE"; then
         error_exit "Hash verification FAILED! Files do not match."
         
@@ -396,7 +443,7 @@ main() {
     # Cleanup temporary hash files
     rm -f "$SOURCE_HASH_FILE" "$MOUNT_HASH_FILE"
     
-    # Step 9: Dismount and exit successfully
+    # Step 10: Dismount and exit successfully
     dismount_veracrypt_container "$MOUNT_POINT"
     
     info "=== Backup completed successfully ==="
