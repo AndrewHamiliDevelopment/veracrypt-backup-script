@@ -45,10 +45,10 @@ generate_hashes() {
     
     # Find all files (not directories) and generate SHA256 hash, excluding hidden files/folders
     find "$dir" -type f -not -path '*/.*' -print0 | sort -z | while IFS= read -r -d '' file; do
-        # Get relative path
-        local rel_path="${file#$dir/}"
-        # Generate hash and store with relative path
-        sha256sum "$file" | sed "s|$file|$rel_path|"
+        # Get file name only
+        local base_name="$(basename "$file")"
+        # Generate hash and store with file name only
+        sha256sum "$file" | sed "s|$file|$base_name|"
     done > "$temp_file"
     
     echo "$temp_file"
