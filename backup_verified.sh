@@ -217,16 +217,16 @@ main() {
     # Step 1: Check OS
     check_unix_os
     
-    # Step 2: Generate SHA256 hashes for source directory
-    SOURCE_HASH_FILE=$(generate_hashes "$SOURCE_DIR")
-    info "Source hashes stored in: $SOURCE_HASH_FILE"
-    
-    # Step 3: Get source directory size
+    # Step 2: Get source directory size
     SOURCE_SIZE=$(get_directory_size "$SOURCE_DIR")
     info "Source directory size: $SOURCE_SIZE bytes ($(( SOURCE_SIZE / 1048576 ))MB)"
     
-    # Step 4: Check if destination has enough space
+    # Step 3: Check if destination has enough space
     check_destination_space "$SOURCE_SIZE" "$DEST_DIR"
+    
+    # Step 4: Generate SHA256 hashes for source directory
+    SOURCE_HASH_FILE=$(generate_hashes "$SOURCE_DIR")
+    info "Source hashes stored in: $SOURCE_HASH_FILE"
     
     # Step 5: Copy files using rsync
     copy_files_rsync "$SOURCE_DIR" "$DEST_DIR"
