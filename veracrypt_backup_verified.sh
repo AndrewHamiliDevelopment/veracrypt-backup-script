@@ -400,16 +400,16 @@ main() {
     # Step 2: Check VeraCrypt installation
     check_veracrypt_installed
     
-    # Step 3: Generate SHA256 hashes for source directory
-    SOURCE_HASH_FILE=$(generate_hashes "$SOURCE_DIR")
-    info "Source hashes stored in: $SOURCE_HASH_FILE"
-    
-    # Step 4: Get source directory size
+    # Step 3: Get source directory size
     SOURCE_SIZE=$(get_directory_size "$SOURCE_DIR")
     info "Source directory size: $SOURCE_SIZE bytes ($(( SOURCE_SIZE / 1048576 ))MB)"
     
-    # Step 5: Check if destination has enough space
+    # Step 4: Check if destination has enough space
     check_destination_space "$SOURCE_SIZE" "$DEST_DIR"
+    
+    # Step 5: Generate SHA256 hashes for source directory
+    SOURCE_HASH_FILE=$(generate_hashes "$SOURCE_DIR")
+    info "Source hashes stored in: $SOURCE_HASH_FILE"
     
     # Step 6: Create and mount VeraCrypt container
     create_veracrypt_container "$CONTAINER_PATH" "$SOURCE_SIZE" "$PASSWORD" "$KEYFILE"
