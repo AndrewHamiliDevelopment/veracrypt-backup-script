@@ -44,17 +44,23 @@ usage() {
     echo "  -s, --skip           Skip backup if container already exists (useful for cron)"
     echo "  -h, --help           Show this help message"
     echo ""
-    echo "Environment Variables (REQUIRED - must set ONE of these):"
+    echo "Environment Variables (REQUIRED - at least one must be set):"
     echo "  VERACRYPT_PASSWORD   Password string for container encryption"
     echo "  VERACRYPT_KEYFILES   Comma-separated paths to keyfiles (e.g., /path/key1,/path/key2)"
     echo ""
+    echo "  NOTE: Both can be set together for enhanced security (layered authentication)."
+    echo ""
     echo "Examples:"
+    echo "  # Password only"
     echo "  export VERACRYPT_PASSWORD='MySecurePassword123'"
     echo "  $0 /backup/data"
     echo ""
+    echo "  # Keyfiles only"
     echo "  export VERACRYPT_KEYFILES='/mnt/securekey,/home/user/.key2'"
     echo "  $0 --skip /backup/data"
     echo ""
+    echo "  # Both password and keyfiles (maximum security)"
+    echo "  export VERACRYPT_PASSWORD='MySecurePassword123'"
     echo "  export VERACRYPT_KEYFILES='/mnt/securekey'"
     echo "  $0 --force /backup/data"
     echo ""
@@ -111,18 +117,14 @@ USE_PASSWORD=false
 USE_KEYFILES=false
 KEYFILES_ARRAY=()
 
-if [ -n "${VERACRYPT_PASSWORD:-}" ] && [ -n "${VERACRYPT_KEYFILES:-}" ]; then
-    print_error "Both VERACRYPT_PASSWORD and VERACRYPT_KEYFILES are set!"
-    print_error "Please set only ONE authentication method."
-    exit 1
-elif [ -n "${VERACRYPT_PASSWORD:-}" ]; then
+if [ -n "${VERACRYPT_PASSWORD:-}" ]; then
     USE_PASSWORD=true
-    print_info "Using password authentication"
-elif [ -n "${VERACRYPT_KEYFILES:-}" ]; then
+fi
+
+if [ -n "${VERACRYPT_KEYFILES:-}" ]; then
     USE_KEYFILES=true
     # Split comma-separated keyfiles into array
     IFS=',' read -ra KEYFILES_ARRAY <<< "$VERACRYPT_KEYFILES"
-    print_info "Using keyfile authentication (${#KEYFILES_ARRAY[@]} keyfile(s))"
     
     # Validate each keyfile exists
     for keyfile in "${KEYFILES_ARRAY[@]}"; do
@@ -132,17 +134,38 @@ elif [ -n "${VERACRYPT_KEYFILES:-}" ]; then
             print_error "Keyfile does not exist: $keyfile"
             exit 1
         fi
-        print_info "  - Keyfile found: $keyfile"
     done
-else
+fi
+
+# Require at least one authentication method
+if [ "$USE_PASSWORD" = false ] && [ "$USE_KEYFILES" = false ]; then
     print_error "No authentication method specified!"
-    print_error "Please set either VERACRYPT_PASSWORD or VERACRYPT_KEYFILES environment variable."
+    print_error "Please set VERACRYPT_PASSWORD and/or VERACRYPT_KEYFILES environment variable."
     echo ""
     echo "Examples:"
     echo "  export VERACRYPT_PASSWORD='MySecurePassword123'"
     echo "  export VERACRYPT_KEYFILES='/mnt/securekey'"
     echo "  export VERACRYPT_KEYFILES='/mnt/key1,/mnt/key2,/home/user/.key3'"
+    echo "  # For maximum security, use both:"
+    echo "  export VERACRYPT_PASSWORD='MyPassword' VERACRYPT_KEYFILES='/mnt/key'"
     exit 1
+fi
+
+# Print authentication method info
+if [ "$USE_PASSWORD" = true ] && [ "$USE_KEYFILES" = true ]; then
+    print_info "Using password + keyfile authentication (${#KEYFILES_ARRAY[@]} keyfile(s))"
+    for keyfile in "${KEYFILES_ARRAY[@]}"; do
+        keyfile=$(echo "$keyfile" | xargs)
+        print_info "  - Keyfile found: $keyfile"
+    done
+elif [ "$USE_PASSWORD" = true ]; then
+    print_info "Using password authentication"
+else
+    print_info "Using keyfile authentication (${#KEYFILES_ARRAY[@]} keyfile(s))"
+    for keyfile in "${KEYFILES_ARRAY[@]}"; do
+        keyfile=$(echo "$keyfile" | xargs)
+        print_info "  - Keyfile found: $keyfile"
+    done
 fi
 
 # Validate working directory
@@ -262,8 +285,23 @@ print_info "Creating VeraCrypt container '$CONTAINER_NAME' with NTFS filesystem.
 # Convert KB to bytes for VeraCrypt (multiply by 1024)
 CONTAINER_SIZE_BYTES=$((CONTAINER_SIZE * 1024))
 
-if [ "$USE_PASSWORD" = true ]; then
-    # Use password authentication
+if [ "$USE_PASSWORD" = true ] && [ "$USE_KEYFILES" = true ]; then
+    # Use both password and keyfile authentication
+    KEYFILES_PARAM=$(IFS=, ; echo "${KEYFILES_ARRAY[*]}")
+    echo -n "$VERACRYPT_PASSWORD" | veracrypt --text \
+        --create "$CONTAINER_NAME" \
+        --volume-type=normal \
+        --size="$CONTAINER_SIZE_BYTES" \
+        --encryption=AES \
+        --hash=sha512 \
+        --filesystem=NTFS \
+        --keyfiles="$KEYFILES_PARAM" \
+        --pim=0 \
+        --random-source=/dev/urandom \
+        --stdin \
+        --non-interactive
+elif [ "$USE_PASSWORD" = true ]; then
+    # Use password authentication only
     echo -n "$VERACRYPT_PASSWORD" | veracrypt --text \
         --create "$CONTAINER_NAME" \
         --volume-type=normal \
@@ -276,7 +314,7 @@ if [ "$USE_PASSWORD" = true ]; then
         --stdin \
         --non-interactive
 else
-    # Use keyfile authentication
+    # Use keyfile authentication only
     KEYFILES_PARAM=$(IFS=, ; echo "${KEYFILES_ARRAY[*]}")
     veracrypt --text \
         --create "$CONTAINER_NAME" \
@@ -306,8 +344,18 @@ mkdir -p "$MOUNT_POINT"
 # Mount the container
 print_info "Mounting VeraCrypt container..."
 
-if [ "$USE_PASSWORD" = true ]; then
-    # Mount with password
+if [ "$USE_PASSWORD" = true ] && [ "$USE_KEYFILES" = true ]; then
+    # Mount with both password and keyfiles
+    KEYFILES_PARAM=$(IFS=, ; echo "${KEYFILES_ARRAY[*]}")
+    echo -n "$VERACRYPT_PASSWORD" | veracrypt --text \
+        --keyfiles="$KEYFILES_PARAM" \
+        --pim=0 \
+        --protect-hidden=no \
+        --stdin \
+        "$CONTAINER_NAME" \
+        "$MOUNT_POINT"
+elif [ "$USE_PASSWORD" = true ]; then
+    # Mount with password only
     echo -n "$VERACRYPT_PASSWORD" | veracrypt --text \
         --pim=0 \
         --protect-hidden=no \
@@ -315,7 +363,7 @@ if [ "$USE_PASSWORD" = true ]; then
         "$CONTAINER_NAME" \
         "$MOUNT_POINT"
 else
-    # Mount with keyfiles
+    # Mount with keyfiles only
     KEYFILES_PARAM=$(IFS=, ; echo "${KEYFILES_ARRAY[*]}")
     veracrypt --text \
         --keyfiles="$KEYFILES_PARAM" \
